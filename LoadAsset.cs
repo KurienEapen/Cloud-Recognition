@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Vuforia;
 using UnityEngine.Networking;
+using UnityEngine.Video; 
 
 public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
 {
@@ -32,6 +33,11 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
     public ImageTargetBehaviour ImageTargetTemplate;
     public string path;
     public GameObject newImageTarget;
+    public GameObject player;
+    Object video ; 
+    private AudioSource[] allAudioSources;
+    private bool detected; 
+    public AudioSource audioSource;
 
     #endregion
 
@@ -44,6 +50,7 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
     {
         // register this event handler at the cloud reco behaviour
        // LoadAssetBundle(path);
+        video = Resources.Load("Video") as GameObject;
         CloudRecoBehaviour cloudRecoBehaviour = GetComponent<CloudRecoBehaviour>();
         if (cloudRecoBehaviour)
         {
@@ -63,7 +70,7 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
     /// <summary>
     /// called when TargetFinder has been initialized successfully
     /// </summary>
-    public void OnInitialized()
+    public void OnInitialized(TargetFinder targetFinder)
     {
         // get a reference to the Image Tracker, remember it
         mImageTracker = (ObjectTracker)TrackerManager.Instance.GetTracker<ObjectTracker>();
@@ -95,6 +102,20 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
             ObjectTracker tracker = TrackerManager.Instance.GetTracker<ObjectTracker>();
             tracker.TargetFinder.ClearTrackables(false);
         }
+        else 
+        {
+            if(mTargetMetadata.Contains("audio") == true)
+                StopAllAudio();
+            Debug.Log("Pause Audio");
+        }
+    }
+
+ 
+    void StopAllAudio() {
+        allAudioSources = FindObjectsOfType(typeof(AudioSource)) as AudioSource[];
+        foreach( AudioSource audioS in allAudioSources) {
+        audioS.Stop();
+        }
     }
 
     /// <summary>
@@ -107,21 +128,57 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
         newImageTarget = Instantiate(ImageTargetTemplate.gameObject) as GameObject;
 
         GameObject augmentation = null;
+         TargetFinder.CloudRecoSearchResult cloudRecoSearchResult = 
+        (TargetFinder.CloudRecoSearchResult)targetSearchResult;
 
-        string model_name = targetSearchResult.MetaData;
+        string model_name = cloudRecoSearchResult.MetaData;
 
 
         if (augmentation != null)
             augmentation.transform.parent = newImageTarget.transform;
 
         // enable the new result with the same ImageTargetBehaviour:
-        ImageTargetBehaviour imageTargetBehaviour = mImageTracker.TargetFinder.EnableTracking(targetSearchResult, newImageTarget);
+        ObjectTracker tracker = TrackerManager.Instance.GetTracker<ObjectTracker>();
+        ImageTargetBehaviour imageTargetBehaviour =
+        (ImageTargetBehaviour)tracker.TargetFinder.EnableTracking(
+        targetSearchResult, newImageTarget);
 
 
         Debug.Log("Metadata value is " + model_name);
         mTargetMetadata = model_name;
-        StartCoroutine(GetAssetBundle());
-        
+        if (model_name.Contains("video") != true)
+        {  detected = true ;
+          StartCoroutine(GetAssetBundle());
+        }
+        else {
+            Debug.Log("Player Activated");
+            GameObject obj;
+            obj = (GameObject) Instantiate(video, newImageTarget.transform.position, newImageTarget.transform.rotation);
+            //GameObject child =newImageTarget.transform.GetChild(0).gameObject;
+            //GameObject child = mTargetMetadata.Find("Video").gameObject;
+            //child.SetActive(true);
+            obj.transform.parent = newImageTarget.transform;
+            obj.transform.localScale = new Vector3(1,1,1);
+            obj.transform.rotation = Quaternion.AngleAxis(90, Vector3.right);
+            audioSource = newImageTarget.AddComponent<AudioSource>();
+            newImageTarget.GetComponentInChildren<VideoPlayer>().source = VideoSource.Url;
+ 
+            // Set mode to Audio Source.
+            newImageTarget.GetComponentInChildren<VideoPlayer>().audioOutputMode = VideoAudioOutputMode.AudioSource;
+
+            // We want to control one audio track with the video player
+            newImageTarget.GetComponentInChildren<VideoPlayer>().controlledAudioTrackCount = 1;
+
+            // We enable the first track, which has the id zero
+            newImageTarget.GetComponentInChildren<VideoPlayer>().EnableAudioTrack(0, true);
+
+            // ...and we set the audio source for this track
+            newImageTarget.GetComponentInChildren<VideoPlayer>().SetTargetAudioSource(0, audioSource);
+
+            // now set an url to play
+            newImageTarget.GetComponentInChildren<VideoPlayer>().url = model_name;
+           // player.GetComponent<VideoPlayer>().start = true;
+        }
 
         if (!mIsScanning)
         {
@@ -146,7 +203,9 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
 
     IEnumerator GetAssetBundle()
     {
+        
         UnityWebRequest www = UnityWebRequestAssetBundle.GetAssetBundle(mTargetMetadata);
+        //UnityWebRequest www   = WWW.LoadFromCacheOrDownload(mTargetMetadata,5);
         yield return www.SendWebRequest();
 
         if (www.isNetworkError || www.isHttpError)
@@ -158,6 +217,8 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
             myLoadedAssetbundle = DownloadHandlerAssetBundle.GetContent(www);
             Debug.Log("URL SUCCESSFUL");
             InstantiateObjectFromBundle();
+            detected = false;
+            myLoadedAssetbundle.Unload(false);
         }
         
     }
@@ -166,7 +227,9 @@ public class LoadAsset : MonoBehaviour, ICloudRecoEventHandler
 
     void OnGUI()
     {
-        GUI.Box(new Rect(100, 200, 200, 50), "Metadata: " + mTargetMetadata);
+        GUI.skin.box.fontSize = 60;
+        if(detected)
+            GUI.Box(new Rect(0, 0, Screen.width, Screen.height/20), "Loading content...");
     }
 
 
